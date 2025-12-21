@@ -118,22 +118,22 @@ choice BOARD_TYPE
     help
         Board type. 开发板类型
     config BOARD_TYPE_BREAD_COMPACT_WIFI
-        bool "Bread Compact WiFi (面包�?)"
+        bool "Bread Compact WiFi (面包�?)"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_BREAD_COMPACT_WIFI_LCD
-        bool "Bread Compact WiFi + LCD (面包�?)"
+        bool "Bread Compact WiFi + LCD (面包�?)"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_BREAD_COMPACT_WIFI_CAM
-        bool "Bread Compact WiFi + LCD + Camera (面包�?)"
+        bool "Bread Compact WiFi + LCD + Camera (面包�?)"
         depends on IDF_TARGET_ESP32S3     
     config BOARD_TYPE_BREAD_COMPACT_ML307
-        bool "Bread Compact ML307/EC801E (面包�? 4G)"
+        bool "Bread Compact ML307/EC801E (面包�? 4G)"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_BREAD_COMPACT_ESP32
-        bool "Bread Compact ESP32 DevKit (面包�?)"
+        bool "Bread Compact ESP32 DevKit (面包�?)"
         depends on IDF_TARGET_ESP32
     config BOARD_TYPE_BREAD_COMPACT_ESP32_LCD
-        bool "Bread Compact ESP32 DevKit + LCD (面包�?)"
+        bool "Bread Compact ESP32 DevKit + LCD (面包�?)"
         depends on IDF_TARGET_ESP32
     config BOARD_TYPE_XMINI_C3_V3
         bool "Xmini C3 V3"
@@ -196,28 +196,28 @@ choice BOARD_TYPE
         bool "CGC 144"
         depends on IDF_TARGET_ESP32
     config BOARD_TYPE_LICHUANG_DEV_S3
-        bool "立创·实战�? ESP32-S3"
+        bool "立创·实战�? ESP32-S3"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_LICHUANG_DEV_C3
-        bool "立创·实战�? ESP32-C3"
+        bool "立创·实战�? ESP32-C3"
         depends on IDF_TARGET_ESP32C3
     config BOARD_TYPE_DF_K10
-        bool "DFRobot 行空�? k10"
+        bool "DFRobot 行空�? k10"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_DF_S3_AI_CAM
-        bool "DFRobot ESP32-S3 AI智能摄像头模�?"
+        bool "DFRobot ESP32-S3 AI智能摄像头模�?"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_MAGICLICK_S3_2P4
-        bool "神�?�按�? Magiclick_2.4"
+        bool "神�?�按�? Magiclick_2.4"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_MAGICLICK_S3_2P5
-        bool "神�?�按�? Magiclick_2.5"
+        bool "神�?�按�? Magiclick_2.5"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_MAGICLICK_C3
-        bool "神�?�按�? Magiclick_C3"
+        bool "神�?�按�? Magiclick_C3"
         depends on IDF_TARGET_ESP32C3
     config BOARD_TYPE_MAGICLICK_C3_V2
-        bool "神�?�按�? Magiclick_C3_v2"
+        bool "神�?�按�? Magiclick_C3_v2"
         depends on IDF_TARGET_ESP32C3
     config BOARD_TYPE_M5STACK_CORE_S3
         bool "M5Stack CoreS3"
@@ -307,7 +307,7 @@ choice BOARD_TYPE
         bool "Waveshare ESP32-P4-WIFI6-Touch-LCD-3.4C or ESP32-P4-WIFI6-Touch-LCD-4C"
         depends on IDF_TARGET_ESP32P4
     config BOARD_TYPE_TUDOUZI
-        bool "土豆�?"
+        bool "土豆�?"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_LILYGO_T_CIRCLE_S3
         bool "LILYGO T-Circle-S3"
@@ -328,10 +328,10 @@ choice BOARD_TYPE
         bool "LILYGO T-Display-P4"
         depends on IDF_TARGET_ESP32P4
     config BOARD_TYPE_MOVECALL_MOJI_ESP32S3
-        bool "Movecall Moji 小智AI衍生�?"
+        bool "Movecall Moji 小智AI衍生�?"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_MOVECALL_CUICAN_ESP32S3
-        bool "Movecall CuiCan 璀�?·AI吊坠"
+        bool "Movecall CuiCan 璀�?·AI吊坠"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_ATK_DNESP32S3
         bool "正点原子DNESP32S3开发板"
@@ -358,7 +358,7 @@ choice BOARD_TYPE
         bool "嘟嘟开发板CHATX(wifi)"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_TAIJI_PI_S3
-        bool "�?极小派esp32s3"
+        bool "�?极小派esp32s3"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_XINGZHI_CUBE_0_85TFT_WIFI
         bool "无名科技星智0.85(WIFI)"
@@ -385,7 +385,7 @@ choice BOARD_TYPE
         bool "Seeed Studio SenseCAP Watcher"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_DOIT_S3_AIBOX
-        bool "四博智联AI�?伴盒�?"
+        bool "四博智联AI�?伴盒�?"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_MIXGO_NOVA
         bool "元控·青春"
@@ -406,7 +406,7 @@ choice BOARD_TYPE
         bool "征辰科技1.54(ML307)"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_MINSI_K08_DUAL
-        bool "敏思�?�技K08(DUAL)"
+        bool "敏思�?�技K08(DUAL)"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_SPOTPEAR_ESP32_S3_1_54_MUMA
         bool "Spotpear ESP32-S3-1.54-MUMA"
@@ -538,7 +538,7 @@ choice DISPLAY_LCD_TYPE
     config LCD_TYPE_720_720_4_INCH
         bool "Waveshare ESP32-P4-WIFI6-Touch-LCD-4C with 720*720 4inch round display"
     config LCD_CUSTOM
-        bool "Custom LCD (�?定义屏幕参数)"
+        bool "Custom LCD (�?定义屏幕参数)"
 endchoice
 
 choice DISPLAY_ESP32S3_KORVO2_V3
@@ -598,7 +598,7 @@ choice WAKE_WORD_TYPE
         bool "Wakenet model without AFE"
         depends on IDF_TARGET_ESP32C3 || IDF_TARGET_ESP32C5 || IDF_TARGET_ESP32C6 || (IDF_TARGET_ESP32 && SPIRAM)
         help
-            Support ESP32 C3、ESP32 C5 �? ESP32 C6, and (ESP32 with PSRAM)
+            Support ESP32 C3、ESP32 C5 �? ESP32 C6, and (ESP32 with PSRAM)
 
     config USE_AFE_WAKE_WORD
         bool "Wakenet model with AFE"
@@ -623,7 +623,7 @@ config CUSTOM_WAKE_WORD
 
 config CUSTOM_WAKE_WORD_DISPLAY
     string "Custom Wake Word Display"
-    default "小土�?"
+    default "小土�?"
     depends on USE_CUSTOM_WAKE_WORD
     help
         Greeting sent to the server after wake word detection
@@ -805,7 +805,7 @@ menu "TAIJIPAI_S3_CONFIG"
     bool "Enable I2S 2 Slot"
     default y
     help
-        �?动双声道
+        �?动双声道
 endmenu
 
 endmenu

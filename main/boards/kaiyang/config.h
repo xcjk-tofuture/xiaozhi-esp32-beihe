@@ -7,7 +7,7 @@
 #define AUDIO_INPUT_SAMPLE_RATE  16000
 #define AUDIO_OUTPUT_SAMPLE_RATE 16000
 
-// SPM1423 PDM ������˷�����?
+// SPM1423 PDM ������˷�����?
 #define AUDIO_MIC_I2S_GPIO_CLK   GPIO_NUM_1  // PDM CLK
 #define AUDIO_MIC_I2S_GPIO_DATA  GPIO_NUM_2  // PDM DATA
 
@@ -42,10 +42,12 @@
 #define DISPLAY_OFFSET_Y 0
 
 // ������ƣ�����ж����������ţ�
-#define DISPLAY_BACKLIGHT_PIN GPIO_NUM_3  // ����б������ţ����ö�Ӧ��? GPIO
+#define DISPLAY_BACKLIGHT_PIN GPIO_NUM_3  // ����б������ţ����ö�Ӧ��? GPIO
 #define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
 
 // LED ���ã���ѡ��
 #define BUILTIN_LED_GPIO GPIO_NUM_NC
+
+static const size_t LV_BUFFER_SIZE = DISPLAY_HEIGHT * 50;
 
 #endif // _BOARD_CONFIG_H_

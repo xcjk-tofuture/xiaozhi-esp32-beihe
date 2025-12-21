@@ -1,114 +1,391 @@
 /*
- * SPDX-FileCopyrightText: 2022-2023 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2022 atanisoft (github.com/atanisoft)
  *
- * SPDX-License-Identifier: Apache-2.0
+ * SPDX-License-Identifier: MIT
  */
 
+#include <driver/gpio.h>
+#include <esp_check.h>
+#include <esp_lcd_panel_commands.h>
+#include <esp_lcd_panel_interface.h>
+#include <esp_lcd_panel_io.h>
+#include <esp_lcd_panel_ops.h>
+#include <esp_lcd_panel_vendor.h>
+#include <esp_log.h>
+#include <esp_rom_gpio.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <memory.h>
 #include <stdlib.h>
 #include <sys/cdefs.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_lcd_panel_interface.h"
-#include "esp_lcd_panel_io.h"
-#include "esp_lcd_panel_vendor.h"
-#include "esp_lcd_panel_ops.h"
-#include "esp_lcd_panel_commands.h"
-#include "driver/gpio.h"
-#include "esp_log.h"
-#include "esp_check.h"
-
-#include "esp_lcd_ili9486.h"
 
 static const char *TAG = "ili9486";
 
-static esp_err_t panel_ili9486_del(esp_lcd_panel_t *panel);
-static esp_err_t panel_ili9486_reset(esp_lcd_panel_t *panel);
-static esp_err_t panel_ili9486_init(esp_lcd_panel_t *panel);
-static esp_err_t panel_ili9486_draw_bitmap(esp_lcd_panel_t *panel, int x_start, int y_start, int x_end, int y_end, const void *color_data);
-static esp_err_t panel_ili9486_invert_color(esp_lcd_panel_t *panel, bool invert_color_data);
-static esp_err_t panel_ili9486_mirror(esp_lcd_panel_t *panel, bool mirror_x, bool mirror_y);
-static esp_err_t panel_ili9486_swap_xy(esp_lcd_panel_t *panel, bool swap_axes);
-static esp_err_t panel_ili9486_set_gap(esp_lcd_panel_t *panel, int x_gap, int y_gap);
-static esp_err_t panel_ili9486_disp_on_off(esp_lcd_panel_t *panel, bool off);
+typedef struct
+{
+    uint8_t cmd;
+    uint8_t data[16];
+    uint8_t data_bytes;
+} lcd_init_cmd_t;
 
-typedef struct {
+typedef struct
+{
     esp_lcd_panel_t base;
     esp_lcd_panel_io_handle_t io;
     int reset_gpio_num;
     bool reset_level;
     int x_gap;
     int y_gap;
-    uint8_t fb_bits_per_pixel;
-    uint8_t madctl_val; // save current value of LCD_CMD_MADCTL register
-    uint8_t colmod_val; // save current value of LCD_CMD_COLMOD register
-    const ili9486_lcd_init_cmd_t *init_cmds;
-    uint16_t init_cmds_size;
+    uint8_t memory_access_control;
+    uint8_t color_mode;
+    size_t buffer_size;
+    uint8_t *color_buffer;
 } ili9486_panel_t;
 
-esp_err_t esp_lcd_new_panel_ili9486(const esp_lcd_panel_io_handle_t io, const esp_lcd_panel_dev_config_t *panel_dev_config, esp_lcd_panel_handle_t *ret_panel)
+enum ili9486_constants
+{
+    ILI9486_POWER_CTL_THREE = 0xC2,
+    ILI9486_VCOM_CTL = 0xC5,
+    ILI9486_POSITIVE_GAMMA_CTL = 0xE0,
+    ILI9486_NEGATIVE_GAMMA_CTL = 0xE1,
+
+    ILI9486_COLOR_MODE_16BIT = 0x55,
+    ILI9486_COLOR_MODE_18BIT = 0x66,
+
+    ILI9486_INIT_LENGTH_MASK = 0x1F,
+    ILI9486_INIT_DONE_FLAG = 0xFF
+};
+
+static esp_err_t panel_ili9486_del(esp_lcd_panel_t *panel)
+{
+    ili9486_panel_t *ili9486 = __containerof(panel, ili9486_panel_t, base);
+
+    if (ili9486->reset_gpio_num >= 0)
+    {
+        gpio_reset_pin(ili9486->reset_gpio_num);
+    }
+
+    if (ili9486->color_buffer != NULL)
+    {
+        heap_caps_free(ili9486->color_buffer);
+    }
+
+    ESP_LOGI(TAG, "del ili9486 panel @%p", ili9486);
+    free(ili9486);
+    return ESP_OK;
+}
+
+static esp_err_t panel_ili9486_reset(esp_lcd_panel_t *panel)
+{
+    ili9486_panel_t *ili9486 = __containerof(panel, ili9486_panel_t, base);
+    esp_lcd_panel_io_handle_t io = ili9486->io;
+
+    if (ili9486->reset_gpio_num >= 0)
+    {
+        ESP_LOGI(TAG, "Setting GPIO:%d to %d", ili9486->reset_gpio_num,
+                 ili9486->reset_level);
+        // perform hardware reset
+        gpio_set_level(ili9486->reset_gpio_num, ili9486->reset_level);
+        vTaskDelay(pdMS_TO_TICKS(10));
+        ESP_LOGI(TAG, "Setting GPIO:%d to %d", ili9486->reset_gpio_num,
+                 !ili9486->reset_level);
+        gpio_set_level(ili9486->reset_gpio_num, !ili9486->reset_level);
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    else
+    {
+        ESP_LOGI(TAG, "Sending SW_RESET to display");
+        esp_lcd_panel_io_tx_param(io, LCD_CMD_SWRESET, NULL, 0);
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t panel_ili9486_init(esp_lcd_panel_t *panel)
+{
+    ili9486_panel_t *ili9486 = __containerof(panel, ili9486_panel_t, base);
+    esp_lcd_panel_io_handle_t io = ili9486->io;
+
+    lcd_init_cmd_t ili9486_init[] =
+    {
+         { 0xF1, { 0x36,0x04,0x00,0x3C,0x0F,0x8F }, 6 },
+        { 0xF2, { 0x18,0xA3,0x12,0x02,0xB2,0x12,0xFF,0x10,0x00 }, 9 },
+         { 0xF8, { 0x21,0x04 }, 2 },
+        { 0xF9, { 0x00,0x08 }, 2 },
+        { ILI9486_POWER_CTL_THREE, { 0x44 }, 1 },
+        { ILI9486_VCOM_CTL, { 0x00, 0x00, 0x00, 0x00 }, 4 },
+        {
+            ILI9486_POSITIVE_GAMMA_CTL,
+            {
+                0x0F, 0x1F, 0x1C, 0x0C, 0x0F,
+                0x08, 0x48, 0x98, 0x37, 0x0A,
+                0x13, 0x04, 0x11, 0x0D, 0x00
+            },
+            15
+            },
+        {
+            ILI9486_NEGATIVE_GAMMA_CTL,
+            {
+                0x0F, 0x32, 0x2E, 0x0B, 0x0D,
+                0x05, 0x47, 0x75, 0x37, 0x06,
+                0x10, 0x03, 0x24, 0x20, 0x00
+            },
+            15
+            },
+
+        { LCD_CMD_MADCTL, { ili9486->memory_access_control }, 1 },
+        { LCD_CMD_COLMOD, { ili9486->color_mode }, 1 },
+        { LCD_CMD_INVOFF, { 0 }, 0 },
+        { LCD_CMD_NOP, { 0 }, ILI9486_INIT_DONE_FLAG },
+    };
+
+    ESP_LOGI(TAG, "Initializing ILI9486");
+    int cmd = 0;
+    while (ili9486_init[cmd].data_bytes != ILI9486_INIT_DONE_FLAG)
+    {
+        ESP_LOGD(TAG, "Sending CMD: %02x, len: %d", ili9486_init[cmd].cmd,
+                 ili9486_init[cmd].data_bytes & ILI9486_INIT_LENGTH_MASK);
+        esp_lcd_panel_io_tx_param(
+            io, ili9486_init[cmd].cmd, ili9486_init[cmd].data,
+            ili9486_init[cmd].data_bytes & ILI9486_INIT_LENGTH_MASK);
+        cmd++;
+    }
+
+    // Take the display out of sleep mode.
+    esp_lcd_panel_io_tx_param(io, LCD_CMD_SLPOUT, NULL, 0);
+    vTaskDelay(pdMS_TO_TICKS(120));
+
+    // Turn on the display.
+    esp_lcd_panel_io_tx_param(io, LCD_CMD_DISPON, NULL, 0);
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    ESP_LOGI(TAG, "Initialization complete");
+
+    return ESP_OK;
+}
+
+#define SEND_COORDS(start, end, io, cmd)                \
+    esp_lcd_panel_io_tx_param(io, cmd, (uint8_t[]) {    \
+        (start >> 8) & 0xFF,                            \
+        start & 0xFF,                                   \
+        ((end - 1) >> 8) & 0xFF,                        \
+        (end - 1) & 0xFF,                               \
+    }, 4)
+
+static esp_err_t panel_ili9486_draw_bitmap(
+    esp_lcd_panel_t *panel, int x_start, int y_start, int x_end, int y_end,
+    const void *color_data)
+{
+    ili9486_panel_t *ili9486 = __containerof(panel, ili9486_panel_t, base);
+    assert((x_start < x_end) && (y_start < y_end) &&
+            "starting position must be smaller than end position");
+    esp_lcd_panel_io_handle_t io = ili9486->io;
+
+    x_start += ili9486->x_gap;
+    x_end += ili9486->x_gap;
+    y_start += ili9486->y_gap;
+    y_end += ili9486->y_gap;
+
+    size_t color_data_len = (x_end - x_start) * (y_end - y_start);
+
+    SEND_COORDS(x_start, x_end, io, LCD_CMD_CASET);
+    SEND_COORDS(y_start, y_end, io, LCD_CMD_RASET);
+
+    // When the ILI9486 is used in 18-bit color mode we need to convert the
+    // incoming color data from RGB565 (16-bit) to RGB666.
+    if (ili9486->color_mode == ILI9486_COLOR_MODE_18BIT)
+    {
+        uint8_t *buf = ili9486->color_buffer;
+        uint16_t *raw_color_data = (uint16_t *) color_data;
+        for (uint32_t i = 0, pixel_index = 0; i < color_data_len; i++)
+        {
+            buf[pixel_index++] = (uint8_t) (((raw_color_data[i] & 0xF800) >> 8) |
+                                            ((raw_color_data[i] & 0x8000) >> 13));
+            buf[pixel_index++] = (uint8_t) ((raw_color_data[i] & 0x07E0) >> 3);
+            buf[pixel_index++] = (uint8_t) (((raw_color_data[i] & 0x001F) << 3) |
+                                            ((raw_color_data[i] & 0x0010) >> 2));
+        }
+
+        esp_lcd_panel_io_tx_color(io, LCD_CMD_RAMWR, buf, color_data_len * 3);
+    }
+    else
+    {
+        esp_lcd_panel_io_tx_color(io, LCD_CMD_RAMWR, color_data, color_data_len * 2);
+    }
+
+    return ESP_OK;
+}
+
+#undef SEND_COORDS
+
+static esp_err_t panel_ili9486_invert_color(
+    esp_lcd_panel_t *panel, bool invert_color_data)
+{
+    ili9486_panel_t *ili9486 = __containerof(panel, ili9486_panel_t, base);
+    esp_lcd_panel_io_handle_t io = ili9486->io;
+
+    if (invert_color_data)
+    {
+        esp_lcd_panel_io_tx_param(io, LCD_CMD_INVON, NULL, 0);
+    }
+    else
+    {
+        esp_lcd_panel_io_tx_param(io, LCD_CMD_INVOFF, NULL, 0);
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t panel_ili9486_mirror(
+    esp_lcd_panel_t *panel, bool mirror_x, bool mirror_y)
+{
+    ili9486_panel_t *ili9486 = __containerof(panel, ili9486_panel_t, base);
+    esp_lcd_panel_io_handle_t io = ili9486->io;
+    if (mirror_x)
+    {
+        ili9486->memory_access_control &= ~LCD_CMD_MX_BIT;
+    }
+    else
+    {
+        ili9486->memory_access_control |= LCD_CMD_MX_BIT;
+    }
+    if (mirror_y)
+    {
+        ili9486->memory_access_control |= LCD_CMD_MY_BIT;
+    }
+    else
+    {
+        ili9486->memory_access_control &= ~LCD_CMD_MY_BIT;
+    }
+    esp_lcd_panel_io_tx_param(io, LCD_CMD_MADCTL, &ili9486->memory_access_control, 1);
+    return ESP_OK;
+}
+
+static esp_err_t panel_ili9486_swap_xy(esp_lcd_panel_t *panel, bool swap_axes)
+{
+    ili9486_panel_t *ili9486 = __containerof(panel, ili9486_panel_t, base);
+    esp_lcd_panel_io_handle_t io = ili9486->io;
+    if (swap_axes)
+    {
+        ili9486->memory_access_control |= LCD_CMD_MV_BIT;
+    }
+    else
+    {
+        ili9486->memory_access_control &= ~LCD_CMD_MV_BIT;
+    }
+    esp_lcd_panel_io_tx_param(io, LCD_CMD_MADCTL, &ili9486->memory_access_control, 1);
+    return ESP_OK;
+}
+
+static esp_err_t panel_ili9486_set_gap(
+    esp_lcd_panel_t *panel, int x_gap, int y_gap)
+{
+    ili9486_panel_t *ili9486 = __containerof(panel, ili9486_panel_t, base);
+    ili9486->x_gap = x_gap;
+    ili9486->y_gap = y_gap;
+    return ESP_OK;
+}
+
+static esp_err_t panel_ili9486_disp_on_off(esp_lcd_panel_t *panel, bool on_off)
+{
+    ili9486_panel_t *ili9486 = __containerof(panel, ili9486_panel_t, base);
+    esp_lcd_panel_io_handle_t io = ili9486->io;
+
+#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5, 0, 0)
+    on_off = !on_off;
+#endif
+
+    if (on_off)
+    {
+        esp_lcd_panel_io_tx_param(io, LCD_CMD_DISPON, NULL, 0);
+    }
+    else
+    {
+        esp_lcd_panel_io_tx_param(io, LCD_CMD_DISPOFF, NULL, 0);
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    return ESP_OK;
+}
+
+esp_err_t esp_lcd_new_panel_ili9486(
+    const esp_lcd_panel_io_handle_t io,
+    const esp_lcd_panel_dev_config_t *panel_dev_config,
+    const size_t buffer_size,
+    esp_lcd_panel_handle_t *ret_panel)
 {
     esp_err_t ret = ESP_OK;
     ili9486_panel_t *ili9486 = NULL;
-    gpio_config_t io_conf = { 0 };
-
-    ESP_GOTO_ON_FALSE(io && panel_dev_config && ret_panel, ESP_ERR_INVALID_ARG, err, TAG, "invalid argument");
-    ili9486 = (ili9486_panel_t *)calloc(1, sizeof(ili9486_panel_t));
+    ESP_GOTO_ON_FALSE(io && panel_dev_config && ret_panel, ESP_ERR_INVALID_ARG,
+                      err, TAG, "invalid argument");
+    ili9486 = (ili9486_panel_t *)(calloc(1, sizeof(ili9486_panel_t)));
     ESP_GOTO_ON_FALSE(ili9486, ESP_ERR_NO_MEM, err, TAG, "no mem for ili9486 panel");
 
-    if (panel_dev_config->reset_gpio_num >= 0) {
-        io_conf.mode = GPIO_MODE_OUTPUT;
-        io_conf.pin_bit_mask = 1ULL << panel_dev_config->reset_gpio_num;
-        ESP_GOTO_ON_ERROR(gpio_config(&io_conf), err, TAG, "configure GPIO for RST line failed");
+    if (panel_dev_config->reset_gpio_num >= 0)
+    {
+        gpio_config_t cfg;
+        memset(&cfg, 0, sizeof(gpio_config_t));
+        esp_rom_gpio_pad_select_gpio(panel_dev_config->reset_gpio_num);
+        cfg.pin_bit_mask = BIT64(panel_dev_config->reset_gpio_num);
+        cfg.mode = GPIO_MODE_OUTPUT;
+        ESP_GOTO_ON_ERROR(gpio_config(&cfg), err, TAG,
+                          "configure GPIO for RESET line failed");
     }
 
-#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5, 0, 0)
-    switch (panel_dev_config->color_space) {
-    case ESP_LCD_COLOR_SPACE_RGB:
-        ili9486->madctl_val = 0;
-        break;
-    case ESP_LCD_COLOR_SPACE_BGR:
-        ili9486->madctl_val |= LCD_CMD_BGR_BIT;
-        break;
-    default:
-        ESP_GOTO_ON_FALSE(false, ESP_ERR_NOT_SUPPORTED, err, TAG, "unsupported color space");
-        break;
+    if (panel_dev_config->bits_per_pixel == 16)
+    {
+        ili9486->color_mode = ILI9486_COLOR_MODE_16BIT;
+    }
+    else
+    {
+        ESP_GOTO_ON_FALSE(buffer_size > 0, ESP_ERR_INVALID_ARG, err, TAG,
+                          "Color conversion buffer size must be specified");
+        ili9486->color_mode = ILI9486_COLOR_MODE_18BIT;
+
+        // Allocate DMA buffer for color conversions
+        ili9486->color_buffer =
+            (uint8_t *)heap_caps_malloc(buffer_size * 3, MALLOC_CAP_DMA);
+        ESP_GOTO_ON_FALSE(ili9486->color_buffer, ESP_ERR_NO_MEM, err, TAG,
+                          "Failed to allocate DMA color conversion buffer");
+    }
+
+    ili9486->memory_access_control = LCD_CMD_MX_BIT | LCD_CMD_BGR_BIT;
+
+#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(6, 0, 0)
+    switch (panel_dev_config->color_space)
+    {
+        case ESP_LCD_COLOR_SPACE_RGB:
+            ESP_LOGI(TAG, "Configuring for RGB color order");
+            ili9486->memory_access_control &= ~LCD_CMD_BGR_BIT;
+            break;
+        case ESP_LCD_COLOR_SPACE_BGR:
+            ESP_LOGI(TAG, "Configuring for BGR color order");
+            break;
+        default:
+            ESP_GOTO_ON_FALSE(false, ESP_ERR_INVALID_ARG, err, TAG,
+                              "Unsupported color mode!");
     }
 #else
-    switch (panel_dev_config->rgb_endian) {
-    case LCD_RGB_ENDIAN_RGB:
-        ili9486->madctl_val = 0;
-        break;
-    case LCD_RGB_ENDIAN_BGR:
-        ili9486->madctl_val |= LCD_CMD_BGR_BIT;
-        break;
-    default:
-        ESP_GOTO_ON_FALSE(false, ESP_ERR_NOT_SUPPORTED, err, TAG, "unsupported rgb endian");
-        break;
+    switch (panel_dev_config->rgb_ele_order)
+    {
+        case LCD_RGB_ELEMENT_ORDER_RGB:
+            ESP_LOGI(TAG, "Configuring for RGB color order");
+            ili9486->memory_access_control &= ~LCD_CMD_BGR_BIT;
+            break;
+        case LCD_RGB_ELEMENT_ORDER_BGR:
+            ESP_LOGI(TAG, "Configuring for BGR color order");
+            break;
+        default:
+            ESP_GOTO_ON_FALSE(false, ESP_ERR_INVALID_ARG, err, TAG,
+                              "Unsupported color mode!");
     }
 #endif
-
-    switch (panel_dev_config->bits_per_pixel) {
-    case 16: // RGB565
-        ili9486->colmod_val = 0x55;
-        ili9486->fb_bits_per_pixel = 16;
-        break;
-    case 18: // RGB666
-        ili9486->colmod_val = 0x66;
-        // each color component (R/G/B) should occupy the 6 high bits of a byte, which means 3 full bytes are required for a pixel
-        ili9486->fb_bits_per_pixel = 24;
-        break;
-    default:
-        ESP_GOTO_ON_FALSE(false, ESP_ERR_NOT_SUPPORTED, err, TAG, "unsupported pixel width");
-        break;
-    }
 
     ili9486->io = io;
     ili9486->reset_gpio_num = panel_dev_config->reset_gpio_num;
     ili9486->reset_level = panel_dev_config->flags.reset_active_high;
-    if (panel_dev_config->vendor_config) {
-        ili9486->init_cmds = ((ili9486_vendor_config_t *)panel_dev_config->vendor_config)->init_cmds;
-        ili9486->init_cmds_size = ((ili9486_vendor_config_t *)panel_dev_config->vendor_config)->init_cmds_size;
-    }
     ili9486->base.del = panel_ili9486_del;
     ili9486->base.reset = panel_ili9486_reset;
     ili9486->base.init = panel_ili9486_init;
@@ -123,252 +400,22 @@ esp_err_t esp_lcd_new_panel_ili9486(const esp_lcd_panel_io_handle_t io, const es
     ili9486->base.disp_on_off = panel_ili9486_disp_on_off;
 #endif
     *ret_panel = &(ili9486->base);
-    ESP_LOGD(TAG, "new ili9486 panel @%p", ili9486);
-
-    // ESP_LOGI(TAG, "LCD panel create success, version: %d.%d.%d", ESP_LCD_ILI9486_VER_MAJOR, ESP_LCD_ILI9486_VER_MINOR,
-    //          ESP_LCD_ILI9486_VER_PATCH);
+    ESP_LOGI(TAG, "new ili9486 panel @%p", ili9486);
 
     return ESP_OK;
 
 err:
-    if (ili9486) {
-        if (panel_dev_config->reset_gpio_num >= 0) {
+    if (ili9486)
+    {
+        if (panel_dev_config->reset_gpio_num >= 0)
+        {
             gpio_reset_pin(panel_dev_config->reset_gpio_num);
+        }
+        if (ili9486->color_buffer != NULL)
+        {
+            heap_caps_free(ili9486->color_buffer);
         }
         free(ili9486);
     }
     return ret;
-}
-
-static esp_err_t panel_ili9486_del(esp_lcd_panel_t *panel)
-{
-    ili9486_panel_t *ili9486 = __containerof(panel, ili9486_panel_t, base);
-
-    if (ili9486->reset_gpio_num >= 0) {
-        gpio_reset_pin(ili9486->reset_gpio_num);
-    }
-    ESP_LOGD(TAG, "del ili9486 panel @%p", ili9486);
-    free(ili9486);
-    return ESP_OK;
-}
-
-static esp_err_t panel_ili9486_reset(esp_lcd_panel_t *panel)
-{
-    ili9486_panel_t *ili9486 = __containerof(panel, ili9486_panel_t, base);
-    esp_lcd_panel_io_handle_t io = ili9486->io;
-
-    // perform hardware reset
-    if (ili9486->reset_gpio_num >= 0) {
-        gpio_set_level(ili9486->reset_gpio_num, ili9486->reset_level);
-        vTaskDelay(pdMS_TO_TICKS(10));
-        gpio_set_level(ili9486->reset_gpio_num, !ili9486->reset_level);
-        vTaskDelay(pdMS_TO_TICKS(10));
-    } else { // perform software reset
-        ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(io, LCD_CMD_SWRESET, NULL, 0), TAG, "send command failed");
-        vTaskDelay(pdMS_TO_TICKS(20)); // spec, wait at least 5ms before sending new command
-    }
-
-    return ESP_OK;
-}
-
-typedef struct {
-    uint8_t cmd;
-    uint8_t data[16];
-    uint8_t data_bytes; // Length of data in above data array; 0xFF = end of cmds.
-} lcd_init_cmd_t;
-
-
-static const ili9486_lcd_init_cmd_t vendor_specific_init_default[] = {
-    // Sleep Out
-    {0x11, (uint8_t[]){}, 0, 120},
-
-    // Power Control 3 (0xC2)
-    {0xC2, (uint8_t[]){0x44}, 1, 0},
-
-    // VCOM Control (0xC5)
-    {0xC5, (uint8_t[]){0x00, 0x00, 0x00, 0x00}, 4, 0},
-
-    // Positive Gamma Correction (0xE0)
-    {0xE0, (uint8_t[]){0x1F, 0x25, 0x22, 0x0B, 0x06, 0x0A, 0x4E, 0xC6,
-                    0x39, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, 15, 0},
-
-    // Negative Gamma Correction (0xE1)
-    {0xE1, (uint8_t[]){0x1F, 0x3F, 0x3F, 0x0F, 0x1F, 0x0F, 0x46, 0x49,
-                    0x31, 0x05, 0x09, 0x03, 0x1C, 0x1A, 0x00}, 15, 0},
-
-    // Interface Pixel Format (0x3A)
-    {0x3A, (uint8_t[]){0x55}, 1, 0},
-
-    // Memory Access Control (0x36)
-    {0x36, (uint8_t[]){0x48}, 1, 0},
-
-    // Display Inversion OFF (0x20)
-    {0x20, (uint8_t[]){}, 0, 0},
-
-    // Sleep Out (again, optional)
-    {0x11, (uint8_t[]){}, 0, 120},
-
-    // Display ON (0x29)
-    {0x29, (uint8_t[]){}, 0, 120},
-};
-
-static esp_err_t panel_ili9486_init(esp_lcd_panel_t *panel)
-{
-    ili9486_panel_t *ili9486 = __containerof(panel, ili9486_panel_t, base);
-    esp_lcd_panel_io_handle_t io = ili9486->io;
-
-    // LCD goes into sleep mode and display will be turned off after power on reset, exit sleep mode first
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(io, LCD_CMD_SLPOUT, NULL, 0), TAG, "send command failed");
-    vTaskDelay(pdMS_TO_TICKS(100));
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(io, LCD_CMD_MADCTL, (uint8_t[]) {
-        ili9486->madctl_val,
-    }, 1), TAG, "send command failed");
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(io, LCD_CMD_COLMOD, (uint8_t[]) {
-        ili9486->colmod_val,
-    }, 1), TAG, "send command failed");
-
-    const ili9486_lcd_init_cmd_t *init_cmds = NULL;
-    uint16_t init_cmds_size = 0;
-    if (ili9486->init_cmds) {
-        init_cmds = ili9486->init_cmds;
-        init_cmds_size = ili9486->init_cmds_size;
-    } else {
-        init_cmds = vendor_specific_init_default;
-        init_cmds_size = sizeof(vendor_specific_init_default) / sizeof(ili9486_lcd_init_cmd_t);
-    }
-
-    bool is_cmd_overwritten = false;
-    for (int i = 0; i < init_cmds_size; i++) {
-        // Check if the command has been used or conflicts with the internal
-        switch (init_cmds[i].cmd) {
-        case LCD_CMD_MADCTL:
-            is_cmd_overwritten = true;
-            ili9486->madctl_val = ((uint8_t *)init_cmds[i].data)[0];
-            break;
-        case LCD_CMD_COLMOD:
-            is_cmd_overwritten = true;
-            ili9486->colmod_val = ((uint8_t *)init_cmds[i].data)[0];
-            break;
-        default:
-            is_cmd_overwritten = false;
-            break;
-        }
-
-        if (is_cmd_overwritten) {
-            ESP_LOGW(TAG, "The %02Xh command has been used and will be overwritten by external initialization sequence", init_cmds[i].cmd);
-        }
-
-        ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(io, init_cmds[i].cmd, init_cmds[i].data, init_cmds[i].data_bytes), TAG, "send command failed");
-        vTaskDelay(pdMS_TO_TICKS(init_cmds[i].delay_ms));
-    }
-    ESP_LOGD(TAG, "send init commands success");
-
-    return ESP_OK;
-}
-
-static esp_err_t panel_ili9486_draw_bitmap(esp_lcd_panel_t *panel, int x_start, int y_start, int x_end, int y_end, const void *color_data)
-{
-    ili9486_panel_t *ili9486 = __containerof(panel, ili9486_panel_t, base);
-    assert((x_start < x_end) && (y_start < y_end) && "start position must be smaller than end position");
-    esp_lcd_panel_io_handle_t io = ili9486->io;
-
-    x_start += ili9486->x_gap;
-    x_end += ili9486->x_gap;
-    y_start += ili9486->y_gap;
-    y_end += ili9486->y_gap;
-
-    // define an area of frame memory where MCU can access
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(io, LCD_CMD_CASET, (uint8_t[]) {
-        (x_start >> 8) & 0xFF,
-        x_start & 0xFF,
-        ((x_end - 1) >> 8) & 0xFF,
-        (x_end - 1) & 0xFF,
-    }, 4), TAG, "send command failed");
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(io, LCD_CMD_RASET, (uint8_t[]) {
-        (y_start >> 8) & 0xFF,
-        y_start & 0xFF,
-        ((y_end - 1) >> 8) & 0xFF,
-        (y_end - 1) & 0xFF,
-    }, 4), TAG, "send command failed");
-    // transfer frame buffer
-    size_t len = (x_end - x_start) * (y_end - y_start) * ili9486->fb_bits_per_pixel / 8;
-    esp_lcd_panel_io_tx_color(io, LCD_CMD_RAMWR, color_data, len);
-
-    return ESP_OK;
-}
-
-static esp_err_t panel_ili9486_invert_color(esp_lcd_panel_t *panel, bool invert_color_data)
-{
-    ili9486_panel_t *ili9486 = __containerof(panel, ili9486_panel_t, base);
-    esp_lcd_panel_io_handle_t io = ili9486->io;
-    int command = 0;
-    if (invert_color_data) {
-        command = LCD_CMD_INVON;
-    } else {
-        command = LCD_CMD_INVOFF;
-    }
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(io, command, NULL, 0), TAG, "send command failed");
-    return ESP_OK;
-}
-
-static esp_err_t panel_ili9486_mirror(esp_lcd_panel_t *panel, bool mirror_x, bool mirror_y)
-{
-    ili9486_panel_t *ili9486 = __containerof(panel, ili9486_panel_t, base);
-    esp_lcd_panel_io_handle_t io = ili9486->io;
-    if (mirror_x) {
-        ili9486->madctl_val |= LCD_CMD_MX_BIT;
-    } else {
-        ili9486->madctl_val &= ~LCD_CMD_MX_BIT;
-    }
-    if (mirror_y) {
-        ili9486->madctl_val |= LCD_CMD_MY_BIT;
-    } else {
-        ili9486->madctl_val &= ~LCD_CMD_MY_BIT;
-    }
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(io, LCD_CMD_MADCTL, (uint8_t[]) {
-        ili9486->madctl_val
-    }, 1), TAG, "send command failed");
-    return ESP_OK;
-}
-
-static esp_err_t panel_ili9486_swap_xy(esp_lcd_panel_t *panel, bool swap_axes)
-{
-    ili9486_panel_t *ili9486 = __containerof(panel, ili9486_panel_t, base);
-    esp_lcd_panel_io_handle_t io = ili9486->io;
-    if (swap_axes) {
-        ili9486->madctl_val |= LCD_CMD_MV_BIT;
-    } else {
-        ili9486->madctl_val &= ~LCD_CMD_MV_BIT;
-    }
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(io, LCD_CMD_MADCTL, (uint8_t[]) {
-        ili9486->madctl_val
-    }, 1), TAG, "send command failed");
-    return ESP_OK;
-}
-
-static esp_err_t panel_ili9486_set_gap(esp_lcd_panel_t *panel, int x_gap, int y_gap)
-{
-    ili9486_panel_t *ili9486 = __containerof(panel, ili9486_panel_t, base);
-    ili9486->x_gap = x_gap;
-    ili9486->y_gap = y_gap;
-    return ESP_OK;
-}
-
-static esp_err_t panel_ili9486_disp_on_off(esp_lcd_panel_t *panel, bool on_off)
-{
-    ili9486_panel_t *ili9486 = __containerof(panel, ili9486_panel_t, base);
-    esp_lcd_panel_io_handle_t io = ili9486->io;
-    int command = 0;
-
-#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5, 0, 0)
-    on_off = !on_off;
-#endif
-
-    if (on_off) {
-        command = LCD_CMD_DISPON;
-    } else {
-        command = LCD_CMD_DISPOFF;
-    }
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(io, command, NULL, 0), TAG, "send command failed");
-    return ESP_OK;
 }

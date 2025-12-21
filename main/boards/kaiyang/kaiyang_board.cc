@@ -5,7 +5,7 @@
 #include "config.h"
 
 #include <esp_log.h>
-#include <wifi_station.h>
+#include <wifi_manager.h>
 
 #include "display/lcd_display.h"
 #include "esp_lcd_ili9486.h"
@@ -31,13 +31,29 @@ private:
         io_config.cs_gpio_num = DISPLAY_CS_PIN;
         io_config.dc_gpio_num = DISPLAY_DC_PIN;
         io_config.spi_mode = 0;
-        io_config.pclk_hz = 8 * 1000 * 1000;
-        io_config.trans_queue_depth = 10;
-        io_config.lcd_cmd_bits = 8;
+        io_config.pclk_hz = 20 * 1000 * 1000;
+        io_config.trans_queue_depth = 32;
+        io_config.lcd_cmd_bits = 16;
         io_config.lcd_param_bits = 8;
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5,4,0)
+        io_config.cs_ena_pretrans = 0;
+        io_config.cs_ena_posttrans = 0;
+#endif
+#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5, 0, 0)
+        io_config.flags.dc_as_cmd_phase = 0;
+        io_config.flags.dc_low_on_data = 0;
+        io_config.flags.octal_mode = 0;
+        io_config.flags.lsb_first = 0;
+    #else
+        io_config.flags.dc_low_on_data = 0;
+        io_config.flags.octal_mode = 0;
+        io_config.flags.sio_mode = 0;
+        io_config.flags.lsb_first = 0;
+        io_config.flags.cs_high_active = 0;
+#endif
         ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI3_HOST, &io_config, &panel_io));
 
-        // 初�?�化液晶屏驱动芯�??
+        // 初�?�化液晶屏驱动芯�??
         ESP_LOGD(TAG, "Install LCD driver");
         // const ili9341_vendor_config_t vendor_config = {
         //     .init_cmds = &vendor_specific_init[0],
@@ -46,11 +62,11 @@ private:
 
         esp_lcd_panel_dev_config_t panel_config = {};
         panel_config.reset_gpio_num = DISPLAY_RST_PIN;
-        panel_config.flags.reset_active_high = 1,
+        panel_config.flags.reset_active_high = 0,
         panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR;
         panel_config.bits_per_pixel = 16;
         //panel_config.vendor_config = (void *)&vendor_config;
-        ESP_ERROR_CHECK(esp_lcd_new_panel_ili9486(panel_io, &panel_config, &panel));
+        ESP_ERROR_CHECK(esp_lcd_new_panel_ili9486(panel_io, &panel_config, LV_BUFFER_SIZE, &panel));
         
         esp_lcd_panel_reset(panel);
         esp_lcd_panel_init(panel);
@@ -82,8 +98,8 @@ private:
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateStarting && 
-                !WifiStation::GetInstance().IsConnected()) {
-                ResetWifiConfiguration();
+                !WifiManager::GetInstance().IsConnected()) {
+                EnterWifiConfigMode();
             }
             app.ToggleChatState();
         });
@@ -97,7 +113,7 @@ public:
         InitializeIli9486Display();
         InitializeButtons();
         
-        // ����б������ţ����ñ�������?
+        // ����б������ţ����ñ�������?
         if (DISPLAY_BACKLIGHT_PIN != GPIO_NUM_NC) {
             GetBacklight()->SetBrightness(100);
         }
