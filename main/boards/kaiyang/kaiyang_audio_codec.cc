@@ -14,17 +14,17 @@ KaiyangAudioCodec::KaiyangAudioCodec(int input_sample_rate, int output_sample_ra
     gpio_num_t spkr_bclk, gpio_num_t spkr_lrclk, gpio_num_t spkr_data,
     gpio_num_t spkr_enable) {
     
-    duplex_ = true;  // ʹ�ö�������������?��
+    duplex_ = true;  // ʹ�ö�������������?��
     input_reference_ = false;
     input_channels_ = 1;
     input_sample_rate_ = input_sample_rate;
     output_sample_rate_ = output_sample_rate;
     spkr_enable_pin_ = spkr_enable;
 
-    // ���� PDM ��˷�����?
+    // ���� PDM ��˷�����?
     CreatePdmMicrophone(mic_clk, mic_data);
     
-    // ���� I2S ���������?
+    // ���� I2S ���������?
     CreateI2sSpeaker(spkr_bclk, spkr_lrclk, spkr_data);
 
     SetOutputVolume(volume_);
@@ -54,7 +54,7 @@ KaiyangAudioCodec::~KaiyangAudioCodec() {
 }
 
 void KaiyangAudioCodec::CreatePdmMicrophone(gpio_num_t clk, gpio_num_t data) {
-    // ���� I2S RX ͨ������ PDM ��˷�?
+    // ���� I2S RX ͨ������ PDM ��˷�?
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
     chan_cfg.auto_clear = true;
     ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, NULL, &rx_handle_));
@@ -74,7 +74,7 @@ void KaiyangAudioCodec::CreatePdmMicrophone(gpio_num_t clk, gpio_num_t data) {
     
     ESP_ERROR_CHECK(i2s_channel_init_pdm_rx_mode(rx_handle_, &pdm_rx_cfg));
 
-    // // ������Ƶ���������?
+    // // ������Ƶ���������?
     // audio_codec_i2s_cfg_t i2s_cfg = {
     //     .port = I2S_NUM_0,
     //     .rx_handle = rx_handle_,
@@ -99,13 +99,15 @@ void KaiyangAudioCodec::CreateI2sSpeaker(gpio_num_t bclk, gpio_num_t lrclk, gpio
     ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &tx_handle_, NULL));
 
     // ���ñ�׼ I2S ģʽ
+    i2s_std_slot_config_t slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO);
+    slot_cfg.slot_mask = I2S_STD_SLOT_LEFT;
     i2s_std_config_t std_cfg = {
         .clk_cfg = {
             .sample_rate_hz = (uint32_t)output_sample_rate_,
             .clk_src = I2S_CLK_SRC_DEFAULT,
             .mclk_multiple = I2S_MCLK_MULTIPLE_256,
         },
-        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
+        .slot_cfg = slot_cfg,
         .gpio_cfg = {
             .mclk = I2S_GPIO_UNUSED,
             .bclk = bclk,
@@ -122,7 +124,7 @@ void KaiyangAudioCodec::CreateI2sSpeaker(gpio_num_t bclk, gpio_num_t lrclk, gpio
     
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle_, &std_cfg));
 
-    // // ������Ƶ���������?
+    // // ������Ƶ���������?
     // audio_codec_i2s_cfg_t i2s_cfg = {
     //     .port = I2S_NUM_1,
     //     .rx_handle = NULL,

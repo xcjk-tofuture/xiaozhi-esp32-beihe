@@ -23,7 +23,7 @@ static const char *TAG = "ili9486";
 
 typedef struct
 {
-    uint8_t cmd;
+    uint16_t cmd;
     uint8_t data[16];
     uint8_t data_bytes;
 } lcd_init_cmd_t;
@@ -44,6 +44,8 @@ typedef struct
 
 enum ili9486_constants
 {
+    ILI9486_POWER_CTL_ONE = 0xC0,
+    ILI9486_POWER_CTL_TWO = 0xC1,
     ILI9486_POWER_CTL_THREE = 0xC2,
     ILI9486_VCOM_CTL = 0xC5,
     ILI9486_POSITIVE_GAMMA_CTL = 0xE0,
