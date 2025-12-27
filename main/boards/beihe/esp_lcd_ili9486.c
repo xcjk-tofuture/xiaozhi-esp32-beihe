@@ -16,6 +16,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <memory.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <sys/cdefs.h>
 
@@ -23,7 +24,7 @@ static const char *TAG = "ili9486";
 
 typedef struct
 {
-    uint16_t cmd;
+    uint8_t cmd;
     uint8_t data[16];
     uint8_t data_bytes;
 } lcd_init_cmd_t;
@@ -36,9 +37,9 @@ typedef struct
     bool reset_level;
     int x_gap;
     int y_gap;
+    uint8_t fb_bits_per_pixel;
     uint8_t memory_access_control;
     uint8_t color_mode;
-    size_t buffer_size;
     uint8_t *color_buffer;
 } ili9486_panel_t;
 
@@ -57,6 +58,25 @@ enum ili9486_constants
     ILI9486_INIT_LENGTH_MASK = 0x1F,
     ILI9486_INIT_DONE_FLAG = 0xFF
 };
+
+// Send 8-bit params as 16-bit words (0x00XX) to match 16-bit SPI transfers.
+static esp_err_t panel_ili9486_tx_param_16(esp_lcd_panel_io_handle_t io,
+                                           uint16_t cmd,
+                                           const uint8_t *data,
+                                           size_t data_bytes)
+{
+    if (data == NULL || data_bytes == 0)
+    {
+        return esp_lcd_panel_io_tx_param(io, cmd, NULL, 0);
+    }
+
+    uint16_t buf[32];
+    for (size_t i = 0; i < data_bytes; ++i)
+    {
+        buf[i] = (uint16_t)data[i] << 8;
+    }
+    return esp_lcd_panel_io_tx_param(io, cmd, buf, data_bytes * sizeof(uint16_t));
+}
 
 static esp_err_t panel_ili9486_del(esp_lcd_panel_t *panel)
 {
@@ -135,25 +155,27 @@ static esp_err_t panel_ili9486_init(esp_lcd_panel_t *panel)
             },
             15
             },
-
-        { LCD_CMD_MADCTL, { ili9486->memory_access_control }, 1 },
         { LCD_CMD_COLMOD, { ili9486->color_mode }, 1 },
-        { LCD_CMD_INVOFF, { 0 }, 0 },
+        { LCD_CMD_MADCTL, { ili9486->memory_access_control }, 1 },
         { LCD_CMD_NOP, { 0 }, ILI9486_INIT_DONE_FLAG },
     };
 
     ESP_LOGI(TAG, "Initializing ILI9486");
     int cmd = 0;
+    esp_lcd_panel_io_tx_param(io, LCD_CMD_SLPOUT, NULL, 0);
+    vTaskDelay(pdMS_TO_TICKS(120));
     while (ili9486_init[cmd].data_bytes != ILI9486_INIT_DONE_FLAG)
     {
         ESP_LOGD(TAG, "Sending CMD: %02x, len: %d", ili9486_init[cmd].cmd,
                  ili9486_init[cmd].data_bytes & ILI9486_INIT_LENGTH_MASK);
-        esp_lcd_panel_io_tx_param(
+        panel_ili9486_tx_param_16(
             io, ili9486_init[cmd].cmd, ili9486_init[cmd].data,
             ili9486_init[cmd].data_bytes & ILI9486_INIT_LENGTH_MASK);
         cmd++;
     }
 
+    esp_lcd_panel_io_tx_param(io, LCD_CMD_INVOFF, NULL, 0);
+    vTaskDelay(pdMS_TO_TICKS(120));
     // Take the display out of sleep mode.
     esp_lcd_panel_io_tx_param(io, LCD_CMD_SLPOUT, NULL, 0);
     vTaskDelay(pdMS_TO_TICKS(120));
@@ -168,12 +190,15 @@ static esp_err_t panel_ili9486_init(esp_lcd_panel_t *panel)
 }
 
 #define SEND_COORDS(start, end, io, cmd)                \
-    esp_lcd_panel_io_tx_param(io, cmd, (uint8_t[]) {    \
-        (start >> 8) & 0xFF,                            \
-        start & 0xFF,                                   \
-        ((end - 1) >> 8) & 0xFF,                        \
-        (end - 1) & 0xFF,                               \
-    }, 4)
+    do {                                                \
+        uint8_t coords[] = {                            \
+            (uint8_t)((start >> 8) & 0xFF),             \
+            (uint8_t)(start & 0xFF),                    \
+            (uint8_t)(((end - 1) >> 8) & 0xFF),         \
+            (uint8_t)((end - 1) & 0xFF),                \
+        };                                              \
+        panel_ili9486_tx_param_16(io, cmd, coords, 4);  \
+    } while (0)
 
 static esp_err_t panel_ili9486_draw_bitmap(
     esp_lcd_panel_t *panel, int x_start, int y_start, int x_end, int y_end,
@@ -189,33 +214,13 @@ static esp_err_t panel_ili9486_draw_bitmap(
     y_start += ili9486->y_gap;
     y_end += ili9486->y_gap;
 
-    size_t color_data_len = (x_end - x_start) * (y_end - y_start);
+    
 
     SEND_COORDS(x_start, x_end, io, LCD_CMD_CASET);
     SEND_COORDS(y_start, y_end, io, LCD_CMD_RASET);
 
-    // When the ILI9486 is used in 18-bit color mode we need to convert the
-    // incoming color data from RGB565 (16-bit) to RGB666.
-    if (ili9486->color_mode == ILI9486_COLOR_MODE_18BIT)
-    {
-        uint8_t *buf = ili9486->color_buffer;
-        uint16_t *raw_color_data = (uint16_t *) color_data;
-        for (uint32_t i = 0, pixel_index = 0; i < color_data_len; i++)
-        {
-            buf[pixel_index++] = (uint8_t) (((raw_color_data[i] & 0xF800) >> 8) |
-                                            ((raw_color_data[i] & 0x8000) >> 13));
-            buf[pixel_index++] = (uint8_t) ((raw_color_data[i] & 0x07E0) >> 3);
-            buf[pixel_index++] = (uint8_t) (((raw_color_data[i] & 0x001F) << 3) |
-                                            ((raw_color_data[i] & 0x0010) >> 2));
-        }
-
-        esp_lcd_panel_io_tx_color(io, LCD_CMD_RAMWR, buf, color_data_len * 3);
-    }
-    else
-    {
-        esp_lcd_panel_io_tx_color(io, LCD_CMD_RAMWR, color_data, color_data_len * 2);
-    }
-
+    size_t color_data_len = (x_end - x_start) * (y_end - y_start) * ili9486->fb_bits_per_pixel / 8;
+    esp_lcd_panel_io_tx_color(io, LCD_CMD_RAMWR, color_data, color_data_len);
     return ESP_OK;
 }
 
@@ -260,7 +265,7 @@ static esp_err_t panel_ili9486_mirror(
     {
         ili9486->memory_access_control &= ~LCD_CMD_MY_BIT;
     }
-    esp_lcd_panel_io_tx_param(io, LCD_CMD_MADCTL, &ili9486->memory_access_control, 1);
+    panel_ili9486_tx_param_16(io, LCD_CMD_MADCTL, &ili9486->memory_access_control, 1);
     return ESP_OK;
 }
 
@@ -276,7 +281,7 @@ static esp_err_t panel_ili9486_swap_xy(esp_lcd_panel_t *panel, bool swap_axes)
     {
         ili9486->memory_access_control &= ~LCD_CMD_MV_BIT;
     }
-    esp_lcd_panel_io_tx_param(io, LCD_CMD_MADCTL, &ili9486->memory_access_control, 1);
+    panel_ili9486_tx_param_16(io, LCD_CMD_MADCTL, &ili9486->memory_access_control, 1);
     return ESP_OK;
 }
 
@@ -315,7 +320,6 @@ static esp_err_t panel_ili9486_disp_on_off(esp_lcd_panel_t *panel, bool on_off)
 esp_err_t esp_lcd_new_panel_ili9486(
     const esp_lcd_panel_io_handle_t io,
     const esp_lcd_panel_dev_config_t *panel_dev_config,
-    const size_t buffer_size,
     esp_lcd_panel_handle_t *ret_panel)
 {
     esp_err_t ret = ESP_OK;
@@ -339,30 +343,25 @@ esp_err_t esp_lcd_new_panel_ili9486(
     if (panel_dev_config->bits_per_pixel == 16)
     {
         ili9486->color_mode = ILI9486_COLOR_MODE_16BIT;
+        ili9486->fb_bits_per_pixel = 16;
     }
     else
     {
-        ESP_GOTO_ON_FALSE(buffer_size > 0, ESP_ERR_INVALID_ARG, err, TAG,
-                          "Color conversion buffer size must be specified");
         ili9486->color_mode = ILI9486_COLOR_MODE_18BIT;
-
-        // Allocate DMA buffer for color conversions
-        ili9486->color_buffer =
-            (uint8_t *)heap_caps_malloc(buffer_size * 3, MALLOC_CAP_DMA);
-        ESP_GOTO_ON_FALSE(ili9486->color_buffer, ESP_ERR_NO_MEM, err, TAG,
-                          "Failed to allocate DMA color conversion buffer");
+        ili9486->fb_bits_per_pixel = 24;
     }
 
     ili9486->memory_access_control = LCD_CMD_MX_BIT | LCD_CMD_BGR_BIT;
 
 #if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(6, 0, 0)
-    switch (panel_dev_config->color_space)
+        switch (panel_dev_config->rgb_ele_order)
     {
-        case ESP_LCD_COLOR_SPACE_RGB:
+        case LCD_RGB_ELEMENT_ORDER_RGB:
             ESP_LOGI(TAG, "Configuring for RGB color order");
             ili9486->memory_access_control &= ~LCD_CMD_BGR_BIT;
             break;
-        case ESP_LCD_COLOR_SPACE_BGR:
+        case LCD_RGB_ELEMENT_ORDER_BGR:
+            ili9486->memory_access_control |= LCD_CMD_BGR_BIT;
             ESP_LOGI(TAG, "Configuring for BGR color order");
             break;
         default:
@@ -370,13 +369,14 @@ esp_err_t esp_lcd_new_panel_ili9486(
                               "Unsupported color mode!");
     }
 #else
-    switch (panel_dev_config->rgb_ele_order)
+        switch (panel_dev_config->color_space)
     {
-        case LCD_RGB_ELEMENT_ORDER_RGB:
+        case ESP_LCD_COLOR_SPACE_RGB:
             ESP_LOGI(TAG, "Configuring for RGB color order");
             ili9486->memory_access_control &= ~LCD_CMD_BGR_BIT;
             break;
-        case LCD_RGB_ELEMENT_ORDER_BGR:
+        case ESP_LCD_COLOR_SPACE_BGR:
+            ili9486->memory_access_control |= LCD_CMD_BGR_BIT;
             ESP_LOGI(TAG, "Configuring for BGR color order");
             break;
         default:

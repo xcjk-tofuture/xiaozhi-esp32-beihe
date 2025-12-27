@@ -1,5 +1,6 @@
+#include "esp_lcd_types.h"
 #include "wifi_board.h"
-#include "kaiyang_audio_codec.h"
+#include "Beihe_audio_codec.h"
 #include "application.h"
 #include "button.h"
 #include "config.h"
@@ -14,9 +15,9 @@
 #include <esp_lcd_panel_vendor.h>
 #include <driver/spi_common.h>
 
-#define TAG "KaiyangBoard"
+#define TAG "BeiheBoard"
 
-class KaiyangBoard : public WifiBoard {
+class BeiheBoard : public WifiBoard {
 private:
     LcdDisplay* display_;
     Button boot_button_;
@@ -66,7 +67,7 @@ private:
         panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR;
         panel_config.bits_per_pixel = 16;
         //panel_config.vendor_config = (void *)&vendor_config;
-        ESP_ERROR_CHECK(esp_lcd_new_panel_ili9486(panel_io, &panel_config, LV_BUFFER_SIZE, &panel));
+        ESP_ERROR_CHECK(esp_lcd_new_panel_ili9486(panel_io, &panel_config,  &panel));
         
         esp_lcd_panel_reset(panel);
         esp_lcd_panel_init(panel);
@@ -106,8 +107,8 @@ private:
     }
 
 public:
-    KaiyangBoard() : boot_button_(BOOT_BUTTON_GPIO) {
-        ESP_LOGI(TAG, "Initializing KAIYANG board");
+    BeiheBoard() : boot_button_(BOOT_BUTTON_GPIO) {
+        ESP_LOGI(TAG, "Initializing BEIHE board");
         
         InitializeSpi();
         InitializeIli9486Display();
@@ -118,11 +119,11 @@ public:
             GetBacklight()->SetBrightness(100);
         }
         
-        ESP_LOGI(TAG, "KAIYANG board initialized successfully");
+        ESP_LOGI(TAG, "HEIHE board initialized successfully");
     }
 
     virtual AudioCodec* GetAudioCodec() override {
-        static KaiyangAudioCodec audio_codec(
+        static BeiheAudioCodec audio_codec(
             AUDIO_INPUT_SAMPLE_RATE,
             AUDIO_OUTPUT_SAMPLE_RATE,
             AUDIO_MIC_I2S_GPIO_CLK,
@@ -148,4 +149,4 @@ public:
     }
 };
 
-DECLARE_BOARD(KaiyangBoard);
+DECLARE_BOARD(BeiheBoard);

@@ -1,4 +1,4 @@
-#include "kaiyang_audio_codec.h"
+#include "beihe_audio_codec.h"
 
 #include <esp_log.h>
 #include <driver/i2s_pdm.h>
@@ -7,9 +7,9 @@
 
 #include "config.h"
 
-static const char TAG[] = "KaiyangAudioCodec";
+static const char TAG[] = "BeiheAudioCodec";
 
-KaiyangAudioCodec::KaiyangAudioCodec(int input_sample_rate, int output_sample_rate,
+BeiheAudioCodec::BeiheAudioCodec(int input_sample_rate, int output_sample_rate,
     gpio_num_t mic_clk, gpio_num_t mic_data,
     gpio_num_t spkr_bclk, gpio_num_t spkr_lrclk, gpio_num_t spkr_data,
     gpio_num_t spkr_enable) {
@@ -41,10 +41,10 @@ KaiyangAudioCodec::KaiyangAudioCodec(int input_sample_rate, int output_sample_ra
         gpio_set_level(spkr_enable_pin_, 1);  // ��ʼ�ر�
     }
 
-    ESP_LOGI(TAG, "KaiyangAudioCodec initialized");
+    ESP_LOGI(TAG, "BeiheAudioCodec initialized");
 }
 
-KaiyangAudioCodec::~KaiyangAudioCodec() {
+BeiheAudioCodec::~BeiheAudioCodec() {
     audio_codec_delete_codec_if(in_codec_if_);
     audio_codec_delete_ctrl_if(in_ctrl_if_);
     audio_codec_delete_codec_if(out_codec_if_);
@@ -53,7 +53,7 @@ KaiyangAudioCodec::~KaiyangAudioCodec() {
     audio_codec_delete_data_if(data_if_);
 }
 
-void KaiyangAudioCodec::CreatePdmMicrophone(gpio_num_t clk, gpio_num_t data) {
+void BeiheAudioCodec::CreatePdmMicrophone(gpio_num_t clk, gpio_num_t data) {
     // ���� I2S RX ͨ������ PDM ��˷�?
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
     chan_cfg.auto_clear = true;
@@ -92,7 +92,7 @@ void KaiyangAudioCodec::CreatePdmMicrophone(gpio_num_t clk, gpio_num_t data) {
     ESP_LOGI(TAG, "PDM microphone created");
 }
 
-void KaiyangAudioCodec::CreateI2sSpeaker(gpio_num_t bclk, gpio_num_t lrclk, gpio_num_t data) {
+void BeiheAudioCodec::CreateI2sSpeaker(gpio_num_t bclk, gpio_num_t lrclk, gpio_num_t data) {
     // ���� I2S TX ͨ������ MAX98357A
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
     chan_cfg.auto_clear = true;
@@ -142,21 +142,21 @@ void KaiyangAudioCodec::CreateI2sSpeaker(gpio_num_t bclk, gpio_num_t lrclk, gpio
     ESP_LOGI(TAG, "I2S speaker created");
 }
 
-void KaiyangAudioCodec::SetOutputVolume(int volume) {
+void BeiheAudioCodec::SetOutputVolume(int volume) {
     volume_ = volume;
     AudioCodec::SetOutputVolume(volume);
 }
 
-void KaiyangAudioCodec::EnableInput(bool enable) {
+void BeiheAudioCodec::EnableInput(bool enable) {
     AudioCodec::EnableInput(enable);
 }
 
-void KaiyangAudioCodec::EnableOutput(bool enable) {
+void BeiheAudioCodec::EnableOutput(bool enable) {
     gpio_set_level(AUDIO_SPKR_ENABLE, enable);
         AudioCodec::EnableOutput(enable);
 }
 
-int KaiyangAudioCodec::Read(int16_t* dest, int samples) {
+int BeiheAudioCodec::Read(int16_t* dest, int samples) {
     if (input_enabled_){
         size_t bytes_read;
         i2s_channel_read(rx_handle_, dest, samples * sizeof(int16_t), &bytes_read, portMAX_DELAY);
@@ -167,12 +167,12 @@ int KaiyangAudioCodec::Read(int16_t* dest, int samples) {
     return samples;
 }
 
-int KaiyangAudioCodec::Write(const int16_t* data, int samples) {
+int BeiheAudioCodec::Write(const int16_t* data, int samples) {
     if (output_enabled_){
         size_t bytes_read;
         auto output_data = (int16_t *)malloc(samples * sizeof(int16_t));
         for (size_t i = 0; i < samples; i++){
-            output_data[i] = (float)data[i] * (float)(volume_ / 80.0);
+            output_data[i] = (float)data[i] * (float)(volume_ / 100.0);
         }
         i2s_channel_write(tx_handle_, output_data, samples * sizeof(int16_t), &bytes_read, portMAX_DELAY);
         free(output_data);

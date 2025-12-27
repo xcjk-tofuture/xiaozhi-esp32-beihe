@@ -444,8 +444,8 @@ choice BOARD_TYPE
     config BOARD_TYPE_HU_087
         bool "HU-087"
         depends on IDF_TARGET_ESP32S3
-    config BOARD_TYPE_KAIYANG
-        bool "KAIYANG (ESP32-S3)"
+    config BOARD_TYPE_BEIHE
+        bool "北河小板 (ESP32-S3)"
         depends on IDF_TARGET_ESP32S3
 endchoice
 

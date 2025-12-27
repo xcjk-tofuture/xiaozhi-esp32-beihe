@@ -1,5 +1,5 @@
-#ifndef _KAIYANG_AUDIO_CODEC_H
-#define _KAIYANG_AUDIO_CODEC_H
+#ifndef _BEIHE_AUDIO_CODEC_H
+#define _BEIHE_AUDIO_CODEC_H
 
 #include "audio_codec.h"
 
@@ -7,12 +7,12 @@
 #include <esp_codec_dev_defaults.h>
 
 /**
- * @brief KAIYANG ÒôÆµ±à½âÂëÆ÷
+ * @brief BEIHE ï¿½ï¿½Æµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
  * 
- * ÊäÈë£ºSPM1423 PDM Êý×ÖÂó¿Ë·ç
- * Êä³ö£ºMAX98357A I2S ¹¦·Å
+ * ï¿½ï¿½ï¿½ë£ºSPM1423 PDM ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ë·ï¿½
+ * ï¿½ï¿½ï¿½ï¿½ï¿½MAX98357A I2S ï¿½ï¿½ï¿½ï¿½
  */
-class KaiyangAudioCodec : public AudioCodec {
+class BeiheAudioCodec : public AudioCodec {
 private:
     const audio_codec_data_if_t *data_if_ = nullptr;
     const audio_codec_ctrl_if_t *out_ctrl_if_ = nullptr;
@@ -31,15 +31,15 @@ private:
     virtual int Write(const int16_t* data, int samples) override;
 
 public:
-    KaiyangAudioCodec(int input_sample_rate, int output_sample_rate,
+    BeiheAudioCodec(int input_sample_rate, int output_sample_rate,
         gpio_num_t mic_clk, gpio_num_t mic_data,
         gpio_num_t spkr_bclk, gpio_num_t spkr_lrclk, gpio_num_t spkr_data,
         gpio_num_t spkr_enable);
-    virtual ~KaiyangAudioCodec();
+    virtual ~BeiheAudioCodec();
 
     virtual void SetOutputVolume(int volume) override;
     virtual void EnableInput(bool enable) override;
     virtual void EnableOutput(bool enable) override;
 };
 
-#endif // _KAIYANG_AUDIO_CODEC_H
+#endif // _Beihe_AUDIO_CODEC_H
