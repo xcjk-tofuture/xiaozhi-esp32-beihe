@@ -38,6 +38,7 @@ public:
     virtual ~BeiheAudioCodec();
 
     virtual void SetOutputVolume(int volume) override;
+    virtual int  GetOutputVolume();
     virtual void EnableInput(bool enable) override;
     virtual void EnableOutput(bool enable) override;
 };

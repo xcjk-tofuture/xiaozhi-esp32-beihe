@@ -147,6 +147,11 @@ void BeiheAudioCodec::SetOutputVolume(int volume) {
     AudioCodec::SetOutputVolume(volume);
 }
 
+int BeiheAudioCodec::GetOutputVolume()
+{
+    return  volume_;
+}
+
 void BeiheAudioCodec::EnableInput(bool enable) {
     AudioCodec::EnableInput(enable);
 }

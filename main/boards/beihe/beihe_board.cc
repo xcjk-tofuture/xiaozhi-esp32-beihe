@@ -21,6 +21,9 @@ class BeiheBoard : public WifiBoard {
 private:
     LcdDisplay* display_;
     Button boot_button_;
+    Button left_button_;
+    Button right_button_;
+    Button enter_button_;
 
   void InitializeIli9486Display() {
         esp_lcd_panel_io_handle_t panel_io = nullptr;
@@ -96,7 +99,7 @@ private:
     }
 
     void InitializeButtons() {
-        boot_button_.OnClick([this]() {
+        enter_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateStarting && 
                 !WifiManager::GetInstance().IsConnected()) {
@@ -104,10 +107,26 @@ private:
             }
             app.ToggleChatState();
         });
+
+        left_button_.OnClick([this]() {
+          auto audio = dynamic_cast<BeiheAudioCodec*>(GetAudioCodec());
+          int volume = audio->GetOutputVolume();
+          volume -= 10;
+          if(volume < 0)  volume = 0;
+          audio->SetOutputVolume(volume);
+        });
+
+        right_button_.OnClick([this]() {
+          auto audio = dynamic_cast<BeiheAudioCodec*>(GetAudioCodec());
+          int volume = audio->GetOutputVolume();
+          volume += 10;
+          if(volume > 100)  volume = 100;
+          audio->SetOutputVolume(volume);
+        });
     }
 
 public:
-    BeiheBoard() : boot_button_(BOOT_BUTTON_GPIO) {
+    BeiheBoard() : boot_button_(BOOT_BUTTON_GPIO),left_button_(LEFT_BUTTON_GPIO),  right_button_(RIGHT_BUTTON_GPIO), enter_button_(ENTER_BUTTON_GPIO) {
         ESP_LOGI(TAG, "Initializing BEIHE board");
         
         InitializeSpi();
